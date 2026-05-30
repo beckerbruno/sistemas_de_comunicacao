@@ -1,0 +1,588 @@
+\documentclass[conference]{IEEEtran}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazil]{babel}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{cite}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue
+}
+
+\begin{document}
+
+\title{Tarefa Avaliativa 1 --- Sistemas de Comunicação 2026/1}
+
+\author{
+  \IEEEauthorblockN{Bruno Becker Silva}
+  \IEEEauthorblockA{Escola Politécnica --- PUCRS\\
+  Disciplina: Sistemas de Comunicação\\
+  Professor: Flavio Eduardo Soares e Silva}
+}
+
+\maketitle
+
+% ============================================================
+\section*{Questão 1 — O Sistema de Comunicação como Cadeia Integrada}
+% ============================================================
+
+A comunicação de dados não pode ser tratada como um fenômeno isolado em um único componente,
+pois envolve uma cadeia causal em que cada elemento condiciona o comportamento dos demais.
+O modelo clássico, derivado de Shannon e Weaver (1948) e consolidado na literatura de Rochol~\cite{rochol2012},
+organiza essa cadeia em cinco blocos funcionais: \textbf{fonte}, \textbf{transmissor}, \textbf{meio},
+\textbf{receptor} e \textbf{destino}. Cada bloco impõe restrições distintas sobre desempenho,
+confiabilidade e custo do sistema como um todo.
+
+\subsection*{Papel de cada elemento e suas limitações}
+
+A \textbf{fonte} é responsável por gerar a informação e, portanto, determina a taxa de entropia
+do sinal: quanto maior a variabilidade da informação, maior a largura de banda mínima exigida
+do canal. Uma fonte mal projetada --- por exemplo, sem compressão adequada --- desperdiça
+capacidade do canal e eleva o custo operacional.
+
+O \textbf{transmissor} adapta o sinal da fonte ao meio físico, realizando operações de
+codificação de linha, modulação e, quando necessário, codificação de canal para proteção contra
+erros. Limitações aqui se traduzem em potência insuficiente, mismatch de impedância ou
+modulações inadequadas ao perfil de ruído do meio, degradando a relação sinal-ruído (SNR).
+
+O \textbf{meio de transmissão} é o elemento de maior variabilidade: sua largura de banda,
+atenuação por quilômetro, susceptibilidade a interferências eletromagnéticas (EMI) e retardo
+de propagação determinam o teto físico da comunicação. Uma limitação no meio não pode ser
+compensada apenas por melhorias no transmissor ou receptor, pois o teorema de Shannon estabelece
+o limite de capacidade como $C = B \log_2(1 + \text{SNR})$, onde $B$ é a largura de banda
+disponível no meio.
+
+O \textbf{receptor} deve recuperar o sinal original a partir de uma versão degradada. A qualidade
+de seus circuitos de filtragem, equalização e detecção de limiar define a taxa de erro de bit
+(BER) na presença de ruído. Um receptor com alta figura de ruído (\textit{noise figure}) eleva
+o piso de ruído efetivo, reduzindo a margem de enlace.
+
+O \textbf{destino} impõe requisitos de latência, jitter e taxa mínima de dados que retroalimentam
+o dimensionamento de todos os outros blocos. Em sistemas de vídeo conferência, por exemplo,
+latência acima de 150~ms já prejudica a inteligibilidade da conversa, exigindo QoS nos
+equipamentos de rede.
+
+\subsection*{Exemplos práticos contemporâneos}
+
+\textbf{Exemplo 1 --- Rede 5G:} Na infraestrutura 5G, a fonte (smartphone) gera fluxos de
+vídeo 4K. O transmissor aplica modulação OFDM com até 256-QAM. O meio (ar, frequências entre
+700~MHz e 26~GHz dependendo da faixa) impõe atenuação crescente com a frequência e com
+obstáculos físicos. O receptor (eNB/gNB) utiliza MIMO massivo para diversidade espacial. Uma
+limitação no meio --- como congestionamento em 3,5~GHz por interferência de radar --- força
+\textit{handover} para faixas de menor capacidade, reduzindo a taxa efetiva percebida pelo
+destino. O custo aumenta proporcionalmente à quantidade de pequenas células necessárias para
+compensar as limitações do meio em alta frequência.
+
+\textbf{Exemplo 2 --- Link de fibra óptica intercontinental (submarine cable):} A fonte
+(data center) gera tráfego IP agregado. O transmissor aplica WDM (\textit{Wavelength Division
+Multiplexing}) com dezenas de comprimentos de onda simultâneos. O meio (fibra monomodo
+submersa) apresenta atenuação de $\approx 0{,}2$~dB/km, exigindo amplificadores EDFA a cada
+$\sim$80~km. Uma limitação no receptor --- por exemplo, fotodetectores com baixa
+responsividade --- aumenta a BER, demandando maior margem de potência e, portanto, mais
+repetidores, elevando o custo de implantação do cabo. Uma falha no meio (rompimento mecânico
+por âncora) pode interromper a comunicação de países inteiros, evidenciando a criticidade de
+cada elo da cadeia.
+
+\subsection*{Síntese}
+
+A análise sistêmica é necessária porque a otimização de um único elemento sem considerar os
+demais pode ser ineficaz ou até contraproducente. Um transmissor de altíssima potência não
+resolve limitação de banda do meio; um receptor ultrassensível não compensa modulação inadequada
+do transmissor. O desempenho, a confiabilidade e o custo emergem da interação entre todos os
+cinco elementos.
+
+% ============================================================
+\section*{Questão 2 — O Modelo OSI: Camadas, Serviços e Dependências}
+% ============================================================
+
+O modelo OSI (\textit{Open Systems Interconnection}) organiza as funções de comunicação em
+sete camadas hierárquicas, cada uma resolvendo um problema específico e oferecendo serviços
+bem definidos à camada superior, enquanto consome serviços das camadas inferiores. A seguir
+analisa-se três camadas: \textbf{Física} (camada 1), \textbf{Enlace} (camada 2) e
+\textbf{Rede} (camada 3).
+
+\subsection*{Camada Física (Layer 1)}
+
+\textbf{Problema que resolve:} A camada física trata da representação dos bits como sinais
+elétricos, ópticos ou de rádio sobre o meio físico. Define tensões, impedâncias, codificações
+de linha (NRZ, Manchester, 4B5B), sincronismo de bit e características mecânicas dos conectores.
+
+\textbf{Serviço à camada superior:} Oferece à camada de Enlace uma interface de transmissão
+de bits sem interpretação semântica --- um serviço de \textit{bit pipe}, com transparência
+de dados e garantia apenas de que os bits são transmitidos (mas não necessariamente sem erro).
+
+\textbf{Dependência das camadas inferiores:} A camada Física \textit{é} a camada mais baixa do
+modelo OSI; sua dependência é diretamente com o meio físico (par trançado, fibra, ar), que não
+faz parte do modelo formal mas condiciona todos os parâmetros elétricos e ópticos definidos
+nesta camada.
+
+\subsection*{Camada de Enlace (Layer 2)}
+
+\textbf{Problema que resolve:} O Enlace transforma o serviço de bit pipe --- sujeito a erros ---
+em um canal lógico confiável entre nós diretamente conectados. Realiza enquadramento
+(\textit{framing}), detecção e correção de erros (CRC, ARQ), controle de fluxo e endereçamento
+físico (MAC).
+
+\textbf{Serviço à camada superior:} Entrega à camada de Rede quadros íntegros entre nós
+adjacentes, abstraindo as particularidades do meio físico. A Rede não precisa conhecer se o
+enlace é Ethernet, Wi-Fi ou PPP.
+
+\textbf{Dependência das camadas inferiores:} Depende integralmente da camada Física para a
+temporização de bits e da integridade elétrica do meio. Se a Física apresentar alta taxa de
+erros (SNR baixo), o mecanismo ARQ do Enlace será sobrecarregado com retransmissões, degradando
+o throughput efetivo.
+
+\subsection*{Camada de Rede (Layer 3)}
+
+\textbf{Problema que resolve:} A Rede resolve o problema do roteamento fim-a-fim entre hosts
+em redes heterogêneas e geograficamente distribuídas. Realiza endereçamento lógico (IP),
+roteamento, fragmentação de pacotes e controle de congestionamento.
+
+\textbf{Serviço à camada superior:} Oferece à camada de Transporte um serviço de entrega de
+datagramas entre quaisquer dois hosts na internet, abstraindo a topologia intermediária.
+
+\textbf{Dependência das camadas inferiores:} Depende do Enlace para a entrega hop-a-hop.
+Incompatibilidades no MTU (\textit{Maximum Transmission Unit}) do Enlace obrigam a camada
+de Rede a fragmentar pacotes, aumentando overhead e latência.
+
+\subsection*{Violação de responsabilidades entre camadas}
+
+Quando uma camada assume funções de outra, ocorrem acoplamentos indevidos que comprometem
+interoperabilidade e manutenção. Um exemplo clássico é o protocolo
+\textit{TCP over wireless}: originalmente, o TCP interpretava perda de pacotes como sinal
+de congestionamento (lógica da camada de Transporte), acionando redução de janela. Em enlaces
+sem fio, a perda é predominantemente por erro de bit (responsabilidade do Enlace). O TCP não
+foi projetado para distinguir esses casos, pois pressupunha que o Enlace entregaria quadros
+sem erro. O resultado é a queda desnecessária de throughput em redes Wi-Fi de alta taxa de
+erro, só corrigida por mecanismos como \textit{TCP-Westwood} ou ARQ seletivo na camada 2.
+Esse exemplo ilustra como a violação da abstração de camada --- o Transporte precisando
+conhecer a natureza do meio --- degrada tanto o desempenho quanto a capacidade de evolução
+independente de cada camada.
+
+% ============================================================
+\section*{Questão 3 — Análise de Sinais no Tempo e na Frequência}
+% ============================================================
+
+\subsection*{Complementaridade das representações temporal e espectral}
+
+As representações no domínio do tempo e no domínio da frequência são relacionadas biunivocamente
+pela Transformada de Fourier: $X(f) = \int_{-\infty}^{\infty} x(t)e^{-j2\pi ft}dt$. Isso
+significa que \textit{toda informação presente em uma representação está implícita na outra};
+não há perda de informação ao transitar entre os dois domínios. A visão temporal mostra como
+a amplitude do sinal evolui no tempo --- útil para sincronismo, detecção de transições e
+análise de jitter. A visão espectral revela a distribuição de energia pelas frequências ---
+essencial para dimensionamento de banda, análise de interferência e projeto de filtros.
+As duas visões são, portanto, complementares: cada uma torna explícito o que a outra obscurece.
+
+\subsection*{Efeitos sobre a forma de onda e a recuperação da informação}
+
+\textbf{Aumento da taxa de bits:} Maior taxa implica pulsos mais curtos no tempo. Pelo par
+de Fourier (relação de Heisenberg-Gabor), pulsos mais estreitos possuem espectros mais largos.
+Assim, dobrar a taxa de bits aproximadamente dobra a largura de banda necessária. Se o canal
+não suportar essa banda, os pulsos sofrem alargamento temporal (\textit{ISI --- Inter-Symbol
+Interference}), tornando difícil a decisão no receptor sem equalização.
+
+\textbf{Limitação de banda do canal:} Um canal passa-baixa ideal com largura de banda $B$
+(Hz) é equivalente, pelo critério de Nyquist, a uma capacidade máxima de $2B$ símbolos por
+segundo sem ISI. Se a taxa de símbolos exceder $2B$, os pulsos no domínio do tempo se
+alargam e se sobrepõem, causando ISI inevitável. Na forma de onda, isso se manifesta como
+transições suavizadas e olhos fechados no diagrama de olho, reduzindo drasticamente a margem
+de decisão do receptor.
+
+\textbf{Ruído aditivo (AWGN):} O ruído gaussiano branco adiciona componentes aleatórios em
+todas as frequências, reduzindo a SNR. No domínio do tempo, traduz-se em flutuações
+estocásticas na amplitude do sinal. A recuperação é estatística: o receptor define um limiar
+de decisão e a probabilidade de erro é função de $Q(\sqrt{2E_b/N_0})$, onde $E_b$ é a
+energia por bit e $N_0$ é a densidade espectral de ruído. O aumento de energia por símbolo
+ou a redução da taxa (para aumentar $E_b$) são estratégias diretas de mitigação.
+
+\textbf{Distorção:} Diferentemente do ruído, a distorção é determinística: o canal modifica
+amplitude e fase de forma dependente da frequência (resposta não plana). No domínio do tempo,
+provoca ISI mesmo na ausência de ruído, pois diferentes componentes espectrais do pulso
+chegam com atrasos distintos (\textit{dispersão de grupo}). A recuperação exige equalização
+adaptativa (filtros ZF ou MMSE), que inverte a resposta do canal. A distorção não pode ser
+mitigada apenas aumentando a potência de transmissão, ao contrário do ruído.
+
+% ============================================================
+\section*{Questão 4 — Par Trançado versus Fibra Óptica}
+% ============================================================
+
+A escolha do meio físico é uma decisão de engenharia multidimensional. A
+Tabela~\ref{tab:comparacao} sumariza as principais dimensões de comparação.
+
+\begin{table}[h!]
+\renewcommand{\arraystretch}{1.3}
+\caption{Comparação entre par trançado e fibra óptica}
+\label{tab:comparacao}
+\centering
+\begin{tabular}{>{\bfseries}p{2.2cm} p{2.5cm} p{2.5cm}}
+\toprule
+\textbf{Critério} & \textbf{Par Trançado (UTP/STP)} & \textbf{Fibra Óptica} \\
+\midrule
+Atenuação & $\sim$20--30~dB/km (Cat6A a 500~MHz) & $\sim$0,2~dB/km (SM 1310~nm) \\
+\midrule
+Imunidade a EMI & Moderada (STP) / Baixa (UTP) & Total (dielétrico) \\
+\midrule
+Banda disponível & Até $\sim$2~GHz (Cat8) & Dezenas de THz (WDM) \\
+\midrule
+Custo de material & Baixo & Médio a alto \\
+\midrule
+Custo de instalação & Baixo (conectores simples) & Alto (fusão, testes OTDR) \\
+\midrule
+Facilidade de manutenção & Alta (conectores RJ-45 padrão) & Requer equipamentos especializados \\
+\midrule
+Escalabilidade & Limitada por distância e frequência & Praticamente ilimitada (WDM) \\
+\midrule
+Risco de interceptação & Emite campo EM & Zero (não irradia) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection*{Adequação por cenário}
+
+O par trançado (Cat6A ou Cat8) é a escolha racional para cabeamento horizontal em edifícios
+corporativos, onde as distâncias são inferiores a 100~m, o custo de instalação deve ser
+minimizado e a mão de obra qualificada para fibra é escassa. A substituição de toda a
+infraestrutura de acesso por fibra nesses ambientes elevaria o custo de implantação em uma
+ordem de grandeza sem benefício proporcional de desempenho para aplicações típicas (1~Gbps).
+
+A fibra óptica monomodo é indispensável em enlaces de \textit{backbone}, data centers e
+conexões entre edifícios separados por distâncias superiores a 100~m ou em ambientes com
+forte EMI (ambientes industriais, próximos a motores de alta potência). Sua imunidade
+eletromagnética elimina qualquer acoplamento indutivo ou capacitivo, garantindo integridade
+do sinal independentemente do ambiente elétrico.
+
+Em ambientes industriais com inversores de frequência (que geram ruído de $\sim$kHz a
+$\sim$MHz), o par trançado --- mesmo blindado --- pode apresentar degradação de SNR; a fibra
+resolve estruturalmente esse problema sem qualquer configuração adicional.
+
+\subsection*{Conclusão}
+
+``Melhor meio'' é uma função do contexto de engenharia: distância, orçamento, ambiente
+eletromagnético, taxa de dados requerida e perfil de manutenção da organização. O engenheiro
+deve dimensionar o meio pelo problema concreto, não pela capacidade nominal máxima.
+
+% ============================================================
+\section*{Questão 5 — Largura de Banda, Taxa de Transmissão e Qualidade do Canal}
+% ============================================================
+
+\subsection*{Relações fundamentais}
+
+A taxa máxima de transmissão sem erro em um canal ideal (sem ruído, banda $B$) é dada pelo
+critério de Nyquist: $R_{max} = 2B\log_2 M$, onde $M$ é o número de níveis de sinalização.
+Na presença de ruído gaussiano branco, Shannon estabelece o limite absoluto:
+$C = B\log_2(1 + \text{SNR})$. Nenhuma técnica de codificação ou modulação pode superar
+$C$ com probabilidade de erro arbitrariamente pequena.
+
+\subsection*{Limitações físicas do meio versus limitações de projeto}
+
+\textbf{Limitações físicas do meio} são intrínsecas ao material: a atenuação por resistência
+ôhmica em condutores metálicos, a dispersão cromática em fibras ópticas, o desvanecimento
+multipercurso em canais de rádio e o ruído térmico ($kTB$, onde $k$ é a constante de
+Boltzmann). Essas limitações não podem ser eliminadas por projeto --- apenas contornadas
+(por exemplo, utilizando amplificação, equalização ou diversidade de antenas).
+
+\textbf{Limitações de projeto} são consequências de escolhas de engenharia: modulação com
+eficiência espectral subótima (BPSK quando 64-QAM é viável), ausência de codificação de
+canal (FEC), sincronismo mal projetado ou topologia de rede inadequada. Essas limitações
+\textit{podem} ser eliminadas por redesign do sistema.
+
+\subsection*{Por que aumentar potência nem sempre resolve}
+
+Aumentar a potência de transmissão eleva a SNR e, portanto, pode reduzir a BER em canais
+limitados por ruído AWGN. Contudo, essa estratégia falha em quatro situações:
+
+\begin{enumerate}
+\item \textbf{Interferência dominante:} Em sistemas como Wi-Fi, o ruído é frequentemente
+dominado por interferência de outros transmissores co-canal (não é gaussiano branco). Mais
+potência no transmissor local também aumenta a interferência que ele causa nos vizinhos,
+resultando em aumento proporcional do patamar de interferência. A SNR efetiva não melhora
+e o sistema pode entrar em colapso por poluição eletromagnética.
+
+\item \textbf{Distorção não linear:} Amplificadores de potência operam de forma linear apenas
+abaixo de um ponto de compressão de 1~dB (P1dB). Acima desse ponto, introduzem distorção
+harmônica e intermodulação, degradando a constelação de modulação e aumentando a BER, mesmo
+com potência elevada.
+
+\item \textbf{Limitação de banda:} Se o problema é ISI por banda insuficiente (distorção
+determinística), a potência adicional não resolve, pois o sinal degradado é o resultado da
+resposta em frequência do canal, não da SNR. A solução correta é a equalização.
+
+\item \textbf{Regulamentação espectral:} Limites de potência isotrópica radiada efetiva
+(EIRP) são impostos por órgãos reguladores (ANATEL, FCC), tornando essa estratégia
+inviável em sistemas de rádio sem licença adicional.
+\end{enumerate}
+
+% ============================================================
+\section*{Questão 6 — Projeto de Enlace Inter-Predial: Dados, Voz e Vídeo}
+% ============================================================
+
+\subsection*{Contexto e requisitos}
+
+Interligar dois prédios de um campus com tráfego convergente (dados, voz VoIP e vídeo
+conferência) exige análise multidimensional: a voz tolera latência até $\sim$150~ms e perda
+de pacotes até 1\%; o vídeo exige jitter controlado ($<$30~ms) e banda mínima garantida;
+os dados toleram latência maior, mas exigem confiabilidade na entrega.
+
+\subsection*{Meio físico principal: fibra óptica monomodo}
+
+Para um enlace inter-predial em campus, a \textbf{fibra óptica monomodo} (OS2, 1310/1550~nm)
+é a escolha tecnicamente superior por três razões principais: (1) a distância entre prédios
+tipicamente excede o limite de 100~m do par trançado; (2) o ambiente externo expõe o cabo a
+EMI de fontes como motores, geradores e sistemas de climatização; (3) a capacidade de expansão
+via WDM permite multiplicar a capacidade sem substituição do cabo físico.
+
+A solução completa inclui: dois switches de borda com uplinks de fibra (SFP+ 10GbE),
+patch panels de fibra LC/PC nos distribuidores de cada prédio, e roteador de borda com
+suporte a QoS diferenciado (DSCP).
+
+\subsection*{Requisitos mínimos de integridade do sinal}
+
+O enlace deve apresentar perda óptica total inferior a 3~dB (considerando emendas, conectores
+e margem de sistema), SNR suficiente para operação em 10~Gbps, e latência de propagação
+inferior a 0,5~ms (para distâncias típicas de campus de até 100~m).
+
+\subsection*{Papel das camadas no tratamento da comunicação}
+
+A Camada Física garante a transmissão de bits com integridade óptica. A Camada de Enlace
+(Ethernet 802.3) provê enquadramento e detecção de erros (FCS/CRC-32), além de controle de
+fluxo (802.3x). A Camada de Rede (IP) realiza o roteamento entre as sub-redes dos dois
+prédios e aplica marcação DSCP para QoS. A Camada de Transporte (UDP para voz/vídeo, TCP
+para dados) lida com controle de fluxo fim-a-fim e confiabilidade onde necessário.
+
+\subsection*{Principais riscos técnicos}
+
+Os riscos incluem: (1) \textbf{corte físico do cabo} por obras ou vandalismo --- mitigado
+por dutos subterrâneos protegidos e, idealmente, por redundância de rota; (2)
+\textbf{degradação de conectores} por contaminação de partículas no campo óptico ---
+prevenida por inspeção com microscópio de vídeo antes da instalação; (3)
+\textbf{jitter de rede} em tráfego de voz/vídeo por congestionamento --- mitigado por
+filas com prioridade (WFQ/CBWFQ) e policiamento de tráfego.
+
+\subsection*{Critérios para expansão futura}
+
+A arquitetura deve prever: portas SFP+ livres nos switches (capacidade de 40/100GbE);
+dutos com 40\% de espaço livre para cabos adicionais; e documentação OTDR de referência
+para comparação futura. A adoção de WDM passivo pode quadruplicar a capacidade sem novo
+cabo.
+
+% ============================================================
+\section*{Questão 7 — Canal de Comunicação: Modelo Abstrato e Realidade Física}
+% ============================================================
+
+\subsection*{Canal ideal versus canal real}
+
+No modelo abstrato, um canal de comunicação é um mapeamento matemático entre sinal
+transmitido $x(t)$ e sinal recebido $y(t)$. O canal AWGN ideal satisfaz $y(t) = x(t) + n(t)$,
+onde $n(t)$ é ruído gaussiano branco de densidade espectral $N_0/2$. Esse modelo é
+tratável analiticamente e fornece limites teóricos (capacidade de Shannon), mas \textit{não
+existe} fisicamente.
+
+O canal real é um sistema dinâmico, não-linear, variante no tempo e sujeito a múltiplos
+fenômenos simultâneos. A discrepância entre modelo e realidade é a principal fonte de
+complexidade no projeto de sistemas de comunicação.
+
+\subsection*{Impactos dos fenômenos físicos}
+
+\textbf{Atenuação:} A amplitude do sinal decresce com a distância (lei inversa do quadrado
+para propagação no espaço livre; lei exponencial para meios guiados). No receptor, isso
+reduz a SNR efetiva. Sem controle de ganho automático (AGC), o receptor pode operar em
+saturação ou em sensibilidade insuficiente dependendo da distância.
+
+\textbf{Ruído:} O ruído térmico ($kTBF$, onde $F$ é a figura de ruído do receptor) é
+inevitável. Fontes externas adicionais incluem ruído atmosférico, interferência de outros
+sistemas e ruído de fase dos osciladores locais. O ruído impõe um limite fundamental à
+distância máxima de operação sem amplificação.
+
+\textbf{Interferência:} Diferentemente do ruído (estocástico), a interferência tem
+estrutura determinística mas variável: outros transmissores no mesmo canal ou em canais
+adjacentes. Em sistemas OFDM (Wi-Fi, LTE), a interferência inter-subportadora (ICI)
+surge quando há erro de frequência entre transmissor e receptor.
+
+\textbf{Atraso:} O atraso de propagação é fixo ($d/v_p$, onde $v_p$ é a velocidade de
+fase no meio). Mais problemático é o atraso de grupo variável com a frequência (dispersão),
+que provoca distorção de fase e, consequentemente, ISI.
+
+\subsection*{Estratégias de mitigação pela engenharia}
+
+A engenharia mitiga esses efeitos em múltiplos níveis: codificação de canal com FEC
+(turbo codes, LDPC, polar codes) para ganho de codificação contra ruído; equalização
+adaptativa (LMS, RLS) para compensação de distorção linear; técnicas de diversidade
+(espacial, temporal, de frequência) para combater desvanecimento; OFDM com prefixo
+cíclico para eliminar ISI em canais multipercurso; e amplificadores com controle automático
+de ganho (AGC) para compensar atenuação variável.
+
+% ============================================================
+\section*{Questão 8 — Representação, Codificação e o Canal}
+% ============================================================
+
+\subsection*{Por que a representação deve ser compatível com o canal}
+
+Toda transmissão de informação exige a escolha de uma \textbf{representação}: como os
+símbolos do alfabeto da fonte são mapeados em sinais físicos. Essa escolha não é neutra ---
+ela determina o espectro do sinal transmitido, a eficiência energética e a robustez a
+degradações do canal.
+
+A codificação de linha, por exemplo, define a densidade de transições no sinal transmitido.
+A codificação NRZ-L tem espectro com componente DC significativa, tornando-a inadequada
+para canais passa-banda ou com acoplamento capacitivo (que bloqueia DC). A codificação
+Manchester elimina a componente DC ao custo de dobrar a largura de banda necessária.
+A codificação 4B5B mapeia 4 bits em 5 bits com densidade de transições garantida,
+permitindo recuperação de relógio sem ampliar tanto o espectro quanto Manchester.
+
+\subsection*{Relação com sincronismo}
+
+O sincronismo de bit (recuperação de relógio) depende da densidade de transições no sinal.
+Um sinal NRZ com longas sequências de bits idênticos não apresenta transições, impossibilitando
+que o receptor sincronize o relógio local ao fluxo de dados. Codificações que garantem
+densidade mínima de transições (como 8B10B em Gigabit Ethernet) resolvem esse problema
+de forma elegante, introduzindo apenas 25\% de overhead de banda.
+
+\subsection*{Relação com energia transmitida}
+
+A energia por bit $E_b$ é o produto da potência de transmissão pelo período de bit $T_b = 1/R_b$.
+Aumentar a taxa $R_b$ sem aumentar a potência reduz $E_b$ proporcionalmente, degradando a
+razão $E_b/N_0$ e, portanto, aumentando a BER. A escolha de modulação (BPSK, QPSK, QAM)
+define o compromisso entre eficiência espectral e eficiência energética: esquemas de ordem
+superior (256-QAM) transmitem mais bits por símbolo, mas exigem SNR muito maior para a
+mesma BER.
+
+\subsection*{Robustez à distorção}
+
+Sinais com amplo espectro são mais vulneráveis à resposta em frequência não plana do canal
+(distorção). Uma solução é o \textit{pulse shaping} com filtros de Nyquist (cosseno elevado),
+que concentra a energia do pulso em uma banda controlada e minimiza ISI no receptor
+amostrador. Outra solução é a multiplexação por subportadoras (OFDM), que divide o canal
+seletivo em frequência em $N$ subcanais planos, cada um modulado independentemente, tornando
+o sistema resiliente à dispersão sem necessidade de equalizadores complexos por subportadora.
+
+% ============================================================
+\section*{Questão 9 — Análise Crítica do Modelo OSI}
+% ============================================================
+
+\subsection*{Vantagens do modelo}
+
+\textbf{Vantagem 1 --- Abstração e modularidade:} O modelo OSI provê um vocabulário comum
+e limites de responsabilidade bem definidos, permitindo que equipes de hardware (camadas 1-2)
+e de software (camadas 3-7) trabalhem independentemente. A substituição de Ethernet por
+Wi-Fi na camada 2, por exemplo, não exige modificação dos protocolos IP ou TCP nas camadas
+superiores, pois a interface entre camadas é estável. Essa propriedade é o fundamento da
+evolução tecnológica das redes: sem a abstração de camadas, cada novo meio físico exigiria
+redesign completo da pilha de software.
+
+\textbf{Vantagem 2 --- Ferramenta de diagnóstico:} O modelo estrutura a análise de falhas
+em redes: a metodologia de \textit{troubleshooting} em camadas (verificar física → enlace →
+rede → transporte → aplicação) é universalmente ensinada e praticada. Ferramentas como
+Wireshark organizam capturas de pacotes exatamente segundo as camadas OSI, tornando a
+análise intuitiva.
+
+\subsection*{Limitações do uso estritamente teórico}
+
+\textbf{Limitação 1 --- Não reflete a arquitetura real:} A pilha TCP/IP dominante na
+Internet não mapeia biunivocamente sobre OSI. As camadas de Sessão e Apresentação são
+praticamente inexistentes como entidades separadas: o TLS opera entre Transporte e
+Aplicação, o HTTP trata de sessão e representação de dados simultaneamente. Tentar
+encaixar TCP/IP no OSI gera confusão pedagógica e análises incorretas.
+
+\textbf{Limitação 2 --- Ignorar otimizações cross-layer:} Sistemas modernos de comunicação
+sem fio (LTE, 5G, Wi-Fi 6) utilizam informações de camadas inferiores (qualidade do canal,
+medidas de RSSI) para tomar decisões em camadas superiores (escalonamento de pacotes,
+seleção de modulação). Esse \textit{cross-layer design} é deliberado e necessário para
+eficiência, mas viola formalmente a separação de camadas do modelo. O OSI, aplicado
+rigidamente, desencorajaria tais otimizações.
+
+\subsection*{Conclusão: por que o modelo permanece relevante}
+
+O modelo OSI permanece relevante não como especificação de implementação, mas como
+\textbf{framework conceitual de decomposição de problemas}. Em ensino, fornece
+estrutura para apresentar a complexidade das redes de forma progressiva. Em projeto,
+orienta a análise de interoperabilidade e a detecção de responsabilidades mal alocadas.
+A chave é utilizá-lo como ferramenta intelectual flexível, não como dogma arquitetural:
+reconhecer onde o modelo se aplica bem (separação física/enlace/rede) e onde exige
+adaptação (camadas superiores em sistemas modernos).
+
+% ============================================================
+\section*{Questão 10 — Texto Integrador: Uma Cadeia Lógica Única}
+% ============================================================
+
+A comunicação de dados, em sua essência, é o problema de transportar informação de uma fonte
+para um destino de forma fiel, eficiente e confiável. Compreender por que esse problema é
+difícil --- e como a engenharia o aborda --- exige a integração dos cinco pilares conceituais
+estudados nos Capítulos 1 a 5: fundamentos do sistema de comunicação, arquitetura em camadas,
+teoria de sinais, meios físicos e teoria do canal.
+
+O ponto de partida é o modelo sistêmico (Cap.~1): a comunicação é uma cadeia de elementos
+interdependentes. Esse modelo não é apenas descritivo --- é normativo. Ele estabelece que
+o desempenho global é limitado pelo elo mais fraco e que a otimização local de um componente
+sem considerar os demais pode ser ineficaz ou contraproducente. Um transmissor de altíssima
+eficiência energética é inútil se o meio físico introduzir atenuação que o receptor não
+consegue compensar.
+
+O meio físico (Cap.~4) é o elemento onde as restrições mais fundamentais residem. Suas
+propriedades --- atenuação, banda, susceptibilidade a EMI --- não são configuráveis por
+software. São determinadas pela física dos materiais e pela geometria do enlace. A escolha
+do meio (par trançado, coaxial, fibra óptica, canal de rádio) define os parâmetros dentro
+dos quais todos os outros elementos devem operar.
+
+Para que a informação da fonte chegue ao destino através desse meio, ela deve ser convertida
+em um sinal compatível com as propriedades físicas do canal. É aqui que a teoria de sinais
+(Cap.~3) se torna indispensável: a análise de Fourier revela que qualquer sinal com taxa de
+variação finita ocupa uma largura de banda finita. A escolha de representação, modulação e
+codificação de linha define não apenas o espectro ocupado, mas a sensibilidade do sinal à
+distorção, ao ruído e às limitações do meio.
+
+O canal real (Cap.~5) impõe sobre o sinal transmitido efeitos que o modelo simplificado não
+prevê: atenuação variável, distorção, ruído e interferência. A teoria do canal quantifica
+esses efeitos e estabelece limites fundamentais --- a capacidade de Shannon --- que nenhum
+sistema pode violar. A engenharia de canal (FEC, equalização, diversidade) opera no espaço
+entre o canal ideal e o canal real, tentando aproximar o desempenho prático ao limite teórico.
+
+A arquitetura em camadas (Cap.~2) é a solução de engenharia para gerenciar a complexidade
+resultante dessa cadeia. Cada camada resolve um subproblema específico e abstrai os demais:
+a camada Física lida com sinais no meio; o Enlace provê confiabilidade local; a Rede trata
+do roteamento global. Essa separação permite que avanços em um nível --- como o desenvolvimento
+de fibras de menor atenuação --- beneficiem os protocolos de camadas superiores sem exigir
+redesign da pilha completa.
+
+A interdependência entre essas dimensões é a conclusão central: um problema de alta taxa de
+erros em uma rede pode ter origem no meio físico (atenuação excessiva), no sinal (modulação
+inadequada ao perfil de ruído), no canal (interferência não prevista no projeto), no enlace
+(ausência de FEC) ou na rede (fragmentação excessiva causando RTT alto). Isolar o diagnóstico
+a um único nível sem considerar a cadeia completa leva a soluções paliativas que frequentemente
+deslocam o problema sem resolvê-lo. É por isso que a formação em comunicação de dados exige
+o domínio integrado --- e não fragmentado --- desses cinco pilares.
+
+% ============================================================
+% Bibliografia baseada no Plano de Ensino 2026/1 e Programa 445AH-04
+\begin{thebibliography}{9}
+
+% ---- Bibliografia Principal ----
+\bibitem{rochol2012}
+J. Rochol, \textit{Comunicação de Dados}, vol.~22, Série Livros Didáticos Informática UFRGS.
+Porto Alegre: Bookman, 2012.
+
+% ---- Complementar utilizada (Q2: arquitetura de camadas e sistemas digitais) ----
+\bibitem{sklar2001}
+B. Sklar, \textit{Digital Communications: Fundamentals and Applications}, 2.~ed.
+Upper Saddle River: Prentice Hall, 2001.
+
+% ---- Complementar utilizada (Q3, Q5, Q7, Q8: modulação, ruído, canal, BER) ----
+\bibitem{haykin2004}
+S. Haykin, \textit{Sistemas de Comunicação: Analógicos e Digitais}, 4.~ed.
+Porto Alegre: Bookman, 2004.
+
+% ---- Complementar utilizada (Q3, Q5, Q8: Shannon, modulação digital, ISI, OFDM) ----
+\bibitem{proakis2008}
+J. G. Proakis, \textit{Digital Communications}, 5.~ed. New York: McGraw-Hill, 2008.
+
+\end{thebibliography}
+
+\end{document}

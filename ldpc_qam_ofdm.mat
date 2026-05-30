@@ -1,0 +1,445 @@
+%% ================================================================
+%  TA2 — Sistemas de Comunicação (445AH) — PUCRS 2026/1
+%  Projeto: Codificação LDPC integrada a 16-QAM e OFDM sobre AWGN
+%  Disciplina : 445AH — Sistemas de Comunicação
+%  Professor  : Flavio Eduardo Soares e Silva
+%
+%  Cadeia de comunicação implementada:
+%   Sem FEC : bits → 16-QAM → OFDM → AWGN → OFDM⁻¹ → 16-QAM⁻¹ → bits
+%   Com LDPC: bits → LDPC → 16-QAM → OFDM → AWGN → OFDM⁻¹ → QAM⁻¹ → LDPC⁻¹ → bits
+%
+%  Figuras geradas (salvas no diretório corrente):
+%   ber_vs_snr.png        — Curvas BER × SNR
+%   constellation_tx.png  — Constelação 16-QAM antes do canal (SNR = 12 dB)
+%   constellation_rx.png  — Constelação 16-QAM após canal AWGN (SNR = 12 dB)
+%   ofdm_spectrum.png     — Espectro aproximado do sinal OFDM
+%   Console               — Tabela comparativa Sem FEC vs Com LDPC
+%
+%  Dependências: Communications Toolbox (qammod, qamdemod, awgn)
+%% ================================================================
+
+clear; clc; close all;
+rng(2026);   % semente fixa para reprodutibilidade dos resultados
+
+%% ================================================================
+%  1. PARÂMETROS DO SISTEMA
+%% ================================================================
+
+% ── Modulação ────────────────────────────────────────────────────
+M            = 16;                   % Ordem da modulação QAM
+bitsPerSym   = log2(M);              % bits por símbolo QAM = 4
+
+% ── OFDM ─────────────────────────────────────────────────────────
+NFFT         = 64;                   % Subportadoras (≥ 64, requisito mínimo)
+CP           = 16;                   % Amostras do prefixo cíclico
+bitsPerOFDM  = NFFT * bitsPerSym;   % = 256 bits por símbolo OFDM
+
+% ── Simulação ────────────────────────────────────────────────────
+SNR_dB       = 0:2:14;               % Faixa de SNR em dB (8 pontos)
+numOFDMSym   = 600;                  % Símbolos OFDM por ponto de SNR
+
+% ── Código LDPC [n=6, k=3] — matrizes do Capítulo 7 ─────────────
+% Código sistemático: G = [I₃ | P]
+% Propriedade: G · H^T = 0 (mod 2)  ← verificada na Seção 2
+H = [1 1 1 1 0 0;                   % Matriz de verificação de paridade (3×6)
+     0 1 1 0 1 0;
+     1 1 0 0 0 1];
+
+G = [1 0 0 1 0 1;                   % Matriz geradora sistemática (3×6)
+     0 1 0 1 1 1;
+     0 0 1 1 1 0];
+
+k_ldpc       = 3;                    % Bits de mensagem por bloco
+n_ldpc       = 6;                    % Bits do codeword por bloco
+rate_ldpc    = k_ldpc / n_ldpc;      % Taxa R = 1/2
+maxIter      = 20;                   % Iterações máximas do decodificador
+
+%% ================================================================
+%  2. VERIFICAÇÃO DAS MATRIZES LDPC  (G · H^T = 0 mod 2)
+%% ================================================================
+
+sep = repmat('=', 1, 60);
+fprintf('\n%s\n  VERIFICAÇÃO DAS MATRIZES LDPC\n%s\n', sep, sep);
+
+GHt = mod(G * H', 2);
+if all(GHt(:) == 0)
+    fprintf('  OK: G · H^T = 0 (mod 2) — matrizes consistentes.\n\n');
+else
+    error('ERRO: Matrizes G e H são inconsistentes!');
+end
+
+%% ================================================================
+%  3. ALINHAMENTO DE BITS (sem necessidade de padding)
+%
+%  numOFDMSym = 600 foi escolhido de forma que:
+%    totalCodedBits = 600 × 256 = 153 600
+%    totalMsgBits   = 153 600 / 2  =  76 800  → 76 800/3 = 25 600 ✓
+%% ================================================================
+
+totalCodedBits = numOFDMSym * bitsPerOFDM;    % 153 600
+totalMsgBits   = totalCodedBits * rate_ldpc;  %  76 800
+numBlocks      = totalMsgBits   / k_ldpc;     %  25 600 blocos LDPC
+
+assert(mod(totalMsgBits, k_ldpc) == 0, ...
+    'totalMsgBits não é múltiplo de k_ldpc!');
+
+fprintf('  Bits de mensagem    : %d\n',  totalMsgBits);
+fprintf('  Bits codificados    : %d\n',  totalCodedBits);
+fprintf('  Blocos LDPC         : %d\n',  numBlocks);
+fprintf('  Símbolos OFDM / SNR : %d\n\n', numOFDMSym);
+
+%% ================================================================
+%  4. DEMONSTRAÇÃO DIDÁTICA — VERIFICAÇÃO DE SÍNDROME  rH^T
+%% ================================================================
+
+fprintf('%s\n  DEMONSTRAÇÃO: SÍNDROME rH^T\n%s\n', ...
+    repmat('-',1,60), repmat('-',1,60));
+
+m_ex  = [1 0 1];                           % mensagem de 3 bits
+c_ex  = mod(m_ex * G, 2);                  % codificação: c = m·G (mod 2)
+s_ok  = mod(c_ex  * H', 2);               % síndrome sem erros (deve = 0)
+
+c_err = c_ex; c_err(3) = 1 - c_err(3);   % injeta erro no bit 3
+s_err = mod(c_err * H', 2);               % síndrome com erro (≠ 0)
+c_cor = bitFlipping(c_err, H, 10);        % decodifica pelo bit-flipping
+
+fprintf('  Mensagem original     : [%s]\n',   num2str(m_ex));
+fprintf('  Codeword  c = m·G    : [%s]\n',   num2str(c_ex));
+fprintf('  Síndrome (sem erro)   : [%s]  → zero → palavra válida\n', num2str(s_ok));
+fprintf('  Codeword c/ erro bit3 : [%s]\n',   num2str(c_err));
+fprintf('  Síndrome (com erro)   : [%s]  → ≠ 0 → erro detectado!\n', num2str(s_err));
+fprintf('  Após bit-flipping     : [%s]  → correto: %s\n\n', ...
+    num2str(c_cor), mat2str(isequal(c_cor, c_ex)));
+
+%% ================================================================
+%  5. SIMULAÇÃO MONTE CARLO — BER × SNR
+%% ================================================================
+
+BER_noFEC = zeros(1, length(SNR_dB));
+BER_LDPC  = zeros(1, length(SNR_dB));
+
+% Índice do ponto SNR = 12 dB para salvar dados de constelação
+idx_12 = find(SNR_dB == 12);
+const_tx = []; const_rx = [];
+
+fprintf('%s\n  SIMULAÇÃO BER × SNR\n%s\n', sep, sep);
+fprintf('  %-8s  %-16s  %-16s\n', 'SNR (dB)', 'BER sem FEC', 'BER c/ LDPC');
+fprintf('  %s\n', repmat('-', 1, 44));
+
+for si = 1:length(SNR_dB)
+    snr = SNR_dB(si);
+
+    % ─────────────────────────────────────────────────────────────
+    % SISTEMA SEM FEC
+    %   bits → 16-QAM → OFDM → AWGN → OFDM⁻¹ → QAM⁻¹ → bits
+    % ─────────────────────────────────────────────────────────────
+
+    % [TX] Geração de bits aleatórios
+    txBits = randi([0 1], 1, totalCodedBits);
+
+    % [TX] Modulação 16-QAM (Gray coding, potência média unitária)
+    txSym  = qammod(txBits, M, 'InputType', 'bit', 'UnitAveragePower', true);
+
+    % [TX] OFDM — organiza em NFFT × numOFDMSym e aplica IFFT normalizada
+    %   A normalização sqrt(NFFT) preserva a potência unitária dos símbolos.
+    %   s_n = (1/sqrt(NFFT)) * sum_k X_k * exp(j*2*pi*n*k/NFFT)
+    txGrid = reshape(txSym, NFFT, numOFDMSym);
+    txTime = ifft(txGrid, NFFT, 1) .* sqrt(NFFT);  % IFFT normalizada
+
+    % [TX] Prefixo cíclico: copia as últimas CP amostras para o início
+    txCP   = [txTime(end-CP+1:end, :); txTime];     % (NFFT+CP) × numOFDMSym
+
+    % [Canal] AWGN — SNR medido sobre o sinal transmitido (Es/N0)
+    rxCP = awgn(txCP(:).', snr, 'measured');
+    rxCP = reshape(rxCP, NFFT+CP, numOFDMSym);
+
+    % [RX] Remove prefixo cíclico (primeiras CP amostras descartadas)
+    rxTime = rxCP(CP+1:end, :);
+
+    % [RX] FFT normalizada: Y_k = (1/sqrt(NFFT)) * sum_n y_n * exp(-j*2*pi*n*k/NFFT)
+    rxGrid = fft(rxTime, NFFT, 1) ./ sqrt(NFFT);
+
+    % [RX] Demodulação 16-QAM (decisão rígida)
+    rxSym_noFEC = rxGrid(:).';
+    rxBits = qamdemod(rxSym_noFEC, M, 'OutputType', 'bit', 'UnitAveragePower', true);
+
+    % [Métrica] BER sobre todos os bits
+    BER_noFEC(si) = mean(txBits ~= rxBits);
+
+    % Salva amostras da constelação para SNR = 12 dB
+    if si == idx_12
+        const_tx = txSym(1:min(1000, numel(txSym)));
+        const_rx = rxSym_noFEC(1:min(1000, numel(rxSym_noFEC)));
+    end
+
+    % ─────────────────────────────────────────────────────────────
+    % SISTEMA COM LDPC
+    %   bits → LDPC → 16-QAM → OFDM → AWGN → OFDM⁻¹ → QAM⁻¹ → LDPC⁻¹ → bits
+    % ─────────────────────────────────────────────────────────────
+
+    % [TX] Geração de bits de mensagem (informação)
+    txMsg   = randi([0 1], 1, totalMsgBits);
+
+    % [TX] Codificação LDPC: c = m·G (mod 2) — implementação vetorizada
+    txCoded = ldpcEncode(txMsg, G, k_ldpc, n_ldpc);
+
+    % [TX] Modulação 16-QAM sobre os bits codificados
+    txSym_L = qammod(txCoded, M, 'InputType', 'bit', 'UnitAveragePower', true);
+
+    % [TX] OFDM
+    txGrid_L = reshape(txSym_L, NFFT, numOFDMSym);
+    txTime_L = ifft(txGrid_L, NFFT, 1) .* sqrt(NFFT);
+    txCP_L   = [txTime_L(end-CP+1:end, :); txTime_L];
+
+    % [Canal] AWGN
+    rxCP_L = awgn(txCP_L(:).', snr, 'measured');
+    rxCP_L = reshape(rxCP_L, NFFT+CP, numOFDMSym);
+
+    % [RX] OFDM demodulação
+    rxTime_L = rxCP_L(CP+1:end, :);
+    rxGrid_L = fft(rxTime_L, NFFT, 1) ./ sqrt(NFFT);
+
+    % [RX] Demodulação QAM (decisão rígida — alimenta o decodificador LDPC)
+    rxCoded = qamdemod(rxGrid_L(:).', M, 'OutputType', 'bit', 'UnitAveragePower', true);
+
+    % [RX] Decodificação LDPC por bit-flipping iterativo (vetorizado)
+    rxMsg = ldpcDecode(rxCoded, H, k_ldpc, n_ldpc, maxIter);
+
+    % [Métrica] BER sobre os bits de MENSAGEM decodificados
+    BER_LDPC(si) = mean(txMsg ~= rxMsg);
+
+    fprintf('  %-8.0f  %-16.4e  %-16.4e\n', snr, BER_noFEC(si), BER_LDPC(si));
+end
+
+%% ================================================================
+%  6. TABELA COMPARATIVA (exibida no console)
+%% ================================================================
+
+fprintf('\n%s\n  TABELA: Sem FEC × Com LDPC\n%s\n', sep, sep);
+fprintf('  %-7s  %-13s  %-13s  %-10s  %s\n', ...
+    'SNR(dB)', 'BER s/ FEC', 'BER c/ LDPC', 'Ganho', 'Taxa útil');
+fprintf('  %s\n', repmat('-', 1, 56));
+
+for si = 1:length(SNR_dB)
+    p0 = BER_noFEC(si); p1 = BER_LDPC(si);
+    if p0 > 1e-9 && p1 > 1e-9
+        ganho = sprintf('x%.1f', p0/p1);
+    elseif p0 > 1e-9 && p1 == 0
+        ganho = '>>>';
+    else
+        ganho = 'N/A';
+    end
+    fprintf('  %-7.0f  %-13.4e  %-13.4e  %-10s  50%%\n', ...
+        SNR_dB(si), p0, p1, ganho);
+end
+
+%% ================================================================
+%  7. GERAÇÃO DAS FIGURAS
+%% ================================================================
+
+ideal = qammod(0:15, 16, 'UnitAveragePower', true);   % pontos ideais 16-QAM
+
+%% Figura 1 — Curvas BER × SNR ───────────────────────────────────
+f1 = figure('Name','BER vs SNR','Color','w','Position',[50 50 720 480]);
+
+snr_th  = 0:0.25:16;
+% Curva teórica para 16-QAM Gray-coded em AWGN:
+%   P_b ≈ (3/8) * erfc( sqrt(Es/(10*N0)) )  onde SNR = Es/N0
+BER_th  = (3/8) * erfc(sqrt(10.^(snr_th/10) / 10));
+
+semilogy(snr_th,  BER_th,        'k--', 'LineWidth',1.5, ...
+    'DisplayName','Teórico 16-QAM');
+hold on;
+semilogy(SNR_dB, BER_noFEC+eps, 'bs-', 'LineWidth',2, 'MarkerSize',8, ...
+    'MarkerFaceColor','b', 'DisplayName','Sem FEC (simulado)');
+semilogy(SNR_dB, BER_LDPC+eps,  'ro-', 'LineWidth',2, 'MarkerSize',8, ...
+    'MarkerFaceColor','r', 'DisplayName','Com LDPC R=1/2 (simulado)');
+
+grid on; grid minor;
+xlabel('E_s/N_0 (dB)', 'FontSize',13, 'FontWeight','bold');
+ylabel('BER',           'FontSize',13, 'FontWeight','bold');
+title('Curva BER × SNR — 16-QAM + OFDM + Canal AWGN', ...
+    'FontSize',14, 'FontWeight','bold');
+legend('Location','southwest','FontSize',11);
+ylim([1e-5 1]); xlim([0 14]);
+set(gca,'FontSize',11);
+saveas(f1,'ber_vs_snr.png');
+fprintf('\n  Figura 1 salva: ber_vs_snr.png\n');
+
+%% Figura 2 — Constelação 16-QAM transmitida ─────────────────────
+f2 = figure('Name','Constelação TX','Color','w','Position',[110 100 520 520]);
+plot(real(const_tx), imag(const_tx), 'b.', 'MarkerSize',8);
+hold on;
+plot(real(ideal), imag(ideal), 'r*', 'MarkerSize',14, 'LineWidth',2);
+grid on; axis equal;
+xlabel('In-Phase (I)',    'FontSize',12);
+ylabel('Quadratura (Q)', 'FontSize',12);
+title('Constelação 16-QAM — Antes do Canal', ...
+    'FontSize',13, 'FontWeight','bold');
+legend('Símbolos Tx','Pontos ideais','FontSize',10,'Location','best');
+saveas(f2,'constellation_tx.png');
+fprintf('  Figura 2 salva: constellation_tx.png\n');
+
+%% Figura 3 — Constelação 16-QAM recebida (SNR = 12 dB) ─────────
+f3 = figure('Name','Constelação RX','Color','w','Position',[160 150 520 520]);
+plot(real(const_rx), imag(const_rx), '.', ...
+    'MarkerSize',6, 'Color',[0 0.45 0.74]);
+hold on;
+plot(real(ideal), imag(ideal), 'r*', 'MarkerSize',14, 'LineWidth',2);
+grid on; axis equal;
+xlabel('In-Phase (I)',    'FontSize',12);
+ylabel('Quadratura (Q)', 'FontSize',12);
+title(sprintf('Constelação 16-QAM — Após Canal AWGN (SNR = %d dB)', ...
+    SNR_dB(idx_12)), 'FontSize',13, 'FontWeight','bold');
+legend('Símbolos Rx','Pontos ideais','FontSize',10,'Location','best');
+saveas(f3,'constellation_rx.png');
+fprintf('  Figura 3 salva: constellation_rx.png\n');
+
+%% Figura 4 — Espectro aproximado do sinal OFDM ──────────────────
+% Gera um bloco de símbolos OFDM (nSp símbolos) para análise espectral
+nSp   = 60;
+bSp   = randi([0 1], 1, NFFT * bitsPerSym * nSp);
+sSp   = qammod(bSp, M, 'InputType','bit','UnitAveragePower',true);
+gSp   = reshape(sSp, NFFT, nSp);
+tSp   = ifft(gSp, NFFT, 1) .* sqrt(NFFT);
+cpSp  = [tSp(end-CP+1:end,:); tSp];
+xSp   = cpSp(:);
+
+% PSD via FFT manual + janela Hann (sem dependência extra de toolbox)
+Np     = 4096;
+N_sig  = length(xSp);
+win    = 0.5 * (1 - cos(2*pi*(0:N_sig-1)'/(N_sig-1)));  % janela Hann
+Xw     = fft(xSp .* win, Np);
+PSD    = fftshift(10*log10(abs(Xw).^2 / N_sig + eps));
+Fv     = (-Np/2 : Np/2-1) / Np;
+
+f4 = figure('Name','Espectro OFDM','Color','w','Position',[210 200 720 450]);
+plot(Fv, PSD, 'b-', 'LineWidth',1.2);
+grid on;
+xlabel('Frequência normalizada (ciclos/amostra)', 'FontSize',12);
+ylabel('PSD (dB)',                                 'FontSize',12);
+title('Espectro do Sinal OFDM — 64 Subportadoras, CP = 16', ...
+    'FontSize',13, 'FontWeight','bold');
+xlim([-0.5 0.5]);
+set(gca,'FontSize',11);
+saveas(f4,'ofdm_spectrum.png');
+fprintf('  Figura 4 salva: ofdm_spectrum.png\n');
+
+fprintf('\n  ✓  Simulação concluída com sucesso.\n\n');
+
+%% ================================================================
+%  FUNÇÕES LOCAIS
+%  (Requerem MATLAB R2016b ou superior para uso em scripts)
+%% ================================================================
+
+function coded = ldpcEncode(msgBits, G, k, n)
+%LDPCENCODE  Codificação LDPC vetorizada usando G (GF(2)).
+%
+%   DESCRIÇÃO: Codifica msgBits em blocos de k bits, produzindo
+%   codewords de n bits pela operação c = m · G (mod 2).
+%   Usa reshape para processar todos os blocos em uma única operação
+%   matricial, evitando laços explícitos.
+%
+%   Entradas:
+%     msgBits — vetor linha de bits de mensagem  (1 × N*k)
+%     G       — matriz geradora (k × n) em GF(2)
+%     k       — bits de informação por bloco
+%     n       — bits do codeword por bloco
+%
+%   Saída:
+%     coded   — vetor linha de bits codificados  (1 × N*n)
+%
+%   Alinhamento de memória (MATLAB é column-major):
+%     reshape(msgBits, k, N)' → N blocos nas linhas, k colunas
+%     mod(msg_mat * G, 2)     → N codewords de n bits
+
+    N        = length(msgBits) / k;
+    msg_mat  = reshape(msgBits, k, N)';   % N × k
+    cod_mat  = mod(msg_mat * G, 2);       % N × n  (c = m·G mod 2)
+    coded    = reshape(cod_mat', 1, []);  % 1 × N*n
+end
+
+% ─────────────────────────────────────────────────────────────────
+
+function msgDec = ldpcDecode(rxBits, H, k, n, maxIter)
+%LDPCDECODE  Decodificação LDPC por bit-flipping iterativo (vetorizado).
+%
+%   ALGORITMO BIT-FLIPPING (vetorizado sobre todos os N blocos):
+%
+%   A cada iteração:
+%     1. S = R · H^T (mod 2)         — Síndrome de todos os blocos [N × m]
+%     2. Se todos os blocos têm S=0  → encerra.
+%     3. fail = S · H                 — Contagem de checks insatisfeitos [N × n]
+%                                       fail(b,j) = Σᵢ S(b,i)·H(i,j)
+%     4. Para cada bloco ativo, inverte o bit j com max fail(b,j).
+%
+%   O código é sistemático (G=[I|P]), portanto os primeiros k bits
+%   do codeword corrigido correspondem diretamente à mensagem.
+%
+%   Entradas:
+%     rxBits  — vetor de bits recebidos      (1 × N*n)
+%     H       — matriz de paridade (m × n) em GF(2)
+%     k       — bits de mensagem por bloco
+%     n       — bits do codeword por bloco
+%     maxIter — iterações máximas
+%
+%   Saída:
+%     msgDec  — bits de mensagem decodificados (1 × N*k)
+
+    N      = length(rxBits) / n;
+    rx_mat = reshape(rxBits, n, N)';    % N × n
+
+    for it = 1:maxIter
+        % Passo 1: calcula síndrome de todos os blocos
+        S = mod(rx_mat * H', 2);        % N × m
+
+        % Passo 2: identifica blocos com síndrome não-nula
+        active = any(S, 2);             % N × 1 (lógico)
+        if ~any(active), break; end
+
+        % Passo 3: conta checks insatisfeitos por bit em cada bloco
+        fail = S * H;                   % N × n  (multiplicação inteira)
+
+        % Passo 4: inverte o bit mais "culpado" em cada bloco ativo
+        [~, flip_j] = max(fail, [], 2); % N × 1
+        act          = find(active);
+        lin_idx      = sub2ind(size(rx_mat), act, flip_j(act));
+        rx_mat(lin_idx) = 1 - rx_mat(lin_idx);
+    end
+
+    % Extrai bits de mensagem (código sistemático: colunas 1..k)
+    msgDec = reshape(rx_mat(:, 1:k)', 1, []);   % 1 × N*k
+end
+
+% ─────────────────────────────────────────────────────────────────
+
+function r = bitFlipping(r, H, maxIter)
+%BITFLIPPING  Bit-flipping para um único bloco (uso didático / demonstração).
+%
+%   Idêntico ao algoritmo em ldpcDecode, porém opera em um único
+%   vetor r (1 × n) em vez de N blocos simultâneos.
+%
+%   Entradas:
+%     r       — codeword recebida   (1 × n)
+%     H       — matriz de paridade  (m × n)
+%     maxIter — iterações máximas
+%
+%   Saída:
+%     r       — codeword após tentativa de correção
+
+    [~, n] = size(H);
+    for it = 1:maxIter
+        s = mod(r * H', 2);                % síndrome (1 × m)
+        if ~any(s), return; end            % síndrome nula → ok
+
+        % Contagem de checks insatisfeitos por bit
+        fail = zeros(1, n);
+        for j = 1:n
+            fail(j) = sum(s(H(:,j) == 1));
+        end
+
+        [mx, idx] = max(fail);
+        if mx == 0, return; end            % nenhum check insatisfeito
+        r(idx) = 1 - r(idx);              % inverte o bit mais culpado
+    end
+end
