@@ -109,6 +109,9 @@ fprintf('Colunas livres: '); disp(free_cols);
 fprintf('Matriz G calculada:\n');
 disp(G);
 
+% Salvar free_cols como variavel global para uso na decodificacao
+free_cols_info = free_cols;
+
 % Verificacao final
 syndrome_check = mod(H * G', 2);
 fprintf('H * G^T (deve ser zero):\n');
@@ -219,8 +222,8 @@ rx_ldpc_const = [];
 %% ============================================================
 
 fprintf('Iniciando simulacao...\n');
-fprintf('SNR (dB) | BER sem FEC | BER com LDPC | Ganho (dB)\n');
-fprintf('---------|-------------|--------------|------------\n');
+fprintf('SNR (dB) | BER sem FEC | BER hard-LDPC| BER BP-LDPC  | Ganho (dB)\n');
+fprintf('---------|-------------|--------------|--------------|------------\n');
 
 for idx_snr = 1:length(SNR_dB)
     snr_db = SNR_dB(idx_snr);
@@ -278,6 +281,7 @@ for idx_snr = 1:length(SNR_dB)
     % ========================================================
     
     num_err_ldpc = 0;
+    num_err_hard = 0;  % DEBUG: para hard-decision sem BP
     total_info_bits = 0;
     
     for sym = 1:N_sym
@@ -319,7 +323,10 @@ for idx_snr = 1:length(SNR_dB)
         
         % Calcular LLRs para decodificacao LDPC
         % LLR = log(P(bit=0|y)/P(bit=1|y))
-        sigma2 = 1 / (2*snr_lin);  % Variancia do ruido por dimensao
+        % A variancia do ruido por dimensao (real/imag) apos FFT
+        % No tempo: noise_var = signal_power / snr_lin
+        % Na frequencia (apos FFT normalizada): mesma variancia por dimensao
+        sigma2 = noise_var / 2;  % Variancia por dimensao real (I ou Q)
         llr_ch = compute_llr_16qam(qam_rx, constellation, bit_table, sigma2);
         
         % Decodificacao LDPC (iterativa - Belief Propagation)
@@ -331,13 +338,25 @@ for idx_snr = 1:length(SNR_dB)
             % Decodificador BP (Sum-Product)
             [decoded_block, ~] = ldpc_decode_bp(llr_block, H, max_iter);
             
-            % Extrair bits de informacao (sistematico: primeiros k bits)
-            decoded_bits((blk-1)*k_ldpc + 1 : blk*k_ldpc) = decoded_block(1:k_ldpc);
+            % Extrair bits de informacao
+            % As colunas livres (free_cols_info) correspondem aos bits de info
+            decoded_bits((blk-1)*k_ldpc + 1 : blk*k_ldpc) = decoded_block(free_cols_info);
         end
         
         % Contagem de erros (apenas nos bits de informacao)
         num_err_ldpc = num_err_ldpc + sum(info_bits ~= decoded_bits);
         total_info_bits = total_info_bits + length(info_bits);
+        
+        % DEBUG: Contagem hard-decision sem BP (comparacao)
+        hard_bits = zeros(1, info_bits_per_ofdm);
+        for blk = 1:n_blocks_per_ofdm
+            llr_block = llr_ch((blk-1)*n_ldpc + 1 : blk*n_ldpc);
+            % Hard decision direto dos LLRs: 1 se LLR < 0, 0 se LLR > 0
+            hard_block = (llr_block < 0)';
+            hard_bits((blk-1)*k_ldpc + 1 : blk*k_ldpc) = hard_block(free_cols_info);
+        end
+        err_hard = sum(info_bits ~= hard_bits);
+        num_err_hard = num_err_hard + err_hard;
         
         % Salvar constelacao para plot
         if idx_snr == snr_const_idx && sym == N_sym
@@ -356,8 +375,9 @@ for idx_snr = 1:length(SNR_dB)
         ganho = 0;
     end
     
-    fprintf('%7.1f  |  %.4e  |   %.4e   |   %6.2f\n', ...
-        snr_db, BER_uncoded(idx_snr), BER_ldpc(idx_snr), ganho);
+    ber_hard_debug = num_err_hard / total_info_bits;
+    fprintf('%7.1f  |  %.4e  |   %.4e   |   %.4e  |  %6.2f\n', ...
+        snr_db, BER_uncoded(idx_snr), ber_hard_debug, BER_ldpc(idx_snr), ganho);
 end
 
 fprintf('\nSimulacao concluida!\n');
