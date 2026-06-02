@@ -23,20 +23,12 @@ H = [1 1 1 1 0 0; ...  % Equacao de paridade 1
      0 1 0 1 0 1; ...  % Equacao de paridade 2
      1 1 0 0 0 1];     % Equacao de paridade 3
 
-% Calcular matriz geradora G via metodo direto
-% H e m x n, queremos G de dimensao k x n onde H*G' = 0 (mod 2)
+% Calcular matriz geradora G via eliminacao gaussiana
+% G deve satisfazer H * G' = 0 (mod 2)
 [m, n] = size(H);
-k = n - m;  % Numero de bits de informacao = 3
+k = n - m;  % bits de informacao
 
-% Para matriz H pequena (3x6), calcular G por forca bruta sistematica
-% G deve satisfazer: para cada linha g de G, H * g' = 0 (mod 2)
-% E G deve ter posto k = 3 (linhas linearmente independentes)
-
-% Algoritmo: encontrar todas as solucoes de H*x = 0 e escolher k independentes
-% Para codigo (6,3), o espaco nulo tem dimensao 3
-
-% Metodo: eliminacao gaussiana em H para identificar variaveis livres
-% Vamos colocar H na forma escalonada reduzida
+% Colocar H na forma escalonada para identificar variaveis livres
 
 H_rref = mod(H, 2);  % Garantir que e binaria
 
@@ -98,31 +90,17 @@ for i = 1:k
     G(i, :) = x;
 end
 
-% Debug: mostrar matrizes calculadas
-fprintf('\n=== DEBUG Matrizes LDPC ===\n');
-fprintf('H original:\n');
-disp(H);
-fprintf('H_rref (escalonada):\n');
-disp(H_rref);
-fprintf('Colunas pivot: '); disp(pivot_cols);
-fprintf('Colunas livres: '); disp(free_cols);
-fprintf('Matriz G calculada:\n');
-disp(G);
-
-% Salvar free_cols como variavel global para uso na decodificacao
-free_cols_info = free_cols;
-
 % Verificacao final
 syndrome_check = mod(H * G', 2);
-fprintf('H * G^T (deve ser zero):\n');
-disp(syndrome_check);
-
 if any(syndrome_check(:))
-    error('Matrizes H e G inconsistentes! H*G^T != 0');
+    error('Matrizes H e G inconsistentes!');
 end
 
 fprintf('Verificacao LDPC: H*G^T = 0 (mod 2) - OK\n');
-fprintf('Matriz H (%dx%d): codigo (%d,%d) com taxa R=%.2f\n\n', m, n, n, k, k/n);
+fprintf('Codigo LDPC (%d,%d), taxa R = %.2f\n\n', n, k, k/n);
+
+% Guardar colunas de informacao para decodificacao
+free_cols_info = free_cols;
 
 % Parametros do codigo LDPC
 n_ldpc = 6;          % Comprimento do codeword
@@ -221,9 +199,9 @@ rx_ldpc_const = [];
 % LOOP DE SIMULACAO
 %% ============================================================
 
-fprintf('Iniciando simulacao...\n');
-fprintf('SNR (dB) | BER sem FEC | BER hard-LDPC| BER BP-LDPC  | Ganho (dB)\n');
-fprintf('---------|-------------|--------------|--------------|------------\n');
+fprintf('\nIniciando simulacao...\n');
+fprintf('SNR (dB) | BER sem FEC | BER com LDPC | Ganho (dB)\n');
+fprintf('---------|-------------|--------------|------------\n');
 
 for idx_snr = 1:length(SNR_dB)
     snr_db = SNR_dB(idx_snr);
@@ -281,7 +259,6 @@ for idx_snr = 1:length(SNR_dB)
     % ========================================================
     
     num_err_ldpc = 0;
-    num_err_hard = 0;  % DEBUG: para hard-decision sem BP
     total_info_bits = 0;
     
     for sym = 1:N_sym
@@ -322,11 +299,7 @@ for idx_snr = 1:length(SNR_dB)
         qam_rx = qam_rx(1:(bits_per_ofdm_ldpc/m_bits));
         
         % Calcular LLRs para decodificacao LDPC
-        % LLR = log(P(bit=0|y)/P(bit=1|y))
-        % A variancia do ruido por dimensao (real/imag) apos FFT
-        % No tempo: noise_var = signal_power / snr_lin
-        % Na frequencia (apos FFT normalizada): mesma variancia por dimensao
-        sigma2 = noise_var / 2;  % Variancia por dimensao real (I ou Q)
+        sigma2 = noise_var / 2;  % Variancia por dimensao (I ou Q)
         llr_ch = compute_llr_16qam(qam_rx, constellation, bit_table, sigma2);
         
         % Decodificacao LDPC (iterativa - Belief Propagation)
@@ -347,17 +320,6 @@ for idx_snr = 1:length(SNR_dB)
         num_err_ldpc = num_err_ldpc + sum(info_bits ~= decoded_bits);
         total_info_bits = total_info_bits + length(info_bits);
         
-        % DEBUG: Contagem hard-decision sem BP (comparacao)
-        hard_bits = zeros(1, info_bits_per_ofdm);
-        for blk = 1:n_blocks_per_ofdm
-            llr_block = llr_ch((blk-1)*n_ldpc + 1 : blk*n_ldpc);
-            % Hard decision direto dos LLRs: 1 se LLR < 0, 0 se LLR > 0
-            hard_block = (llr_block < 0)';
-            hard_bits((blk-1)*k_ldpc + 1 : blk*k_ldpc) = hard_block(free_cols_info);
-        end
-        err_hard = sum(info_bits ~= hard_bits);
-        num_err_hard = num_err_hard + err_hard;
-        
         % Salvar constelacao para plot
         if idx_snr == snr_const_idx && sym == N_sym
             rx_ldpc_const = qam_rx(1:min(length(qam_rx), N_data));
@@ -366,18 +328,15 @@ for idx_snr = 1:length(SNR_dB)
     
     BER_ldpc(idx_snr) = num_err_ldpc / total_info_bits;
     
-    % Calcular ganho aproximado (para exibicao)
-    % Ganho simples: melhoria multiplicativa na BER
+    % Calcular ganho aproximado
     if BER_uncoded(idx_snr) > 0 && BER_ldpc(idx_snr) > 0
-        ganho_factor = BER_uncoded(idx_snr) / BER_ldpc(idx_snr);
-        ganho = 10*log10(ganho_factor);  % Em dB aproximado
+        ganho = 10*log10(BER_uncoded(idx_snr) / BER_ldpc(idx_snr));
     else
         ganho = 0;
     end
     
-    ber_hard_debug = num_err_hard / total_info_bits;
-    fprintf('%7.1f  |  %.4e  |   %.4e   |   %.4e  |  %6.2f\n', ...
-        snr_db, BER_uncoded(idx_snr), ber_hard_debug, BER_ldpc(idx_snr), ganho);
+    fprintf('%7.1f  |  %.4e  |   %.4e   |  %6.2f\n', ...
+        snr_db, BER_uncoded(idx_snr), BER_ldpc(idx_snr), ganho);
 end
 
 fprintf('\nSimulacao concluida!\n');
@@ -538,16 +497,13 @@ end
 
 function symbols = qam16_mod(bits, constellation, m_bits)
 % Modulacao 16-QAM
-% bits: vetor de bits (0/1)
-% constellation: pontos da constelacao
-% m_bits: bits por simbolo (4 para 16-QAM)
 
     num_symbols = floor(length(bits) / m_bits);
     symbols = zeros(1, num_symbols);
     
     for i = 1:num_symbols
         bit_chunk = bits((i-1)*m_bits + 1 : i*m_bits);
-        % bi2de manual (left-msb): converte vetor de bits para decimal
+        % Converter bits para indice da constelacao
         idx = 1;
         for b = 1:m_bits
             idx = idx + bit_chunk(b) * 2^(m_bits - b);
@@ -557,28 +513,21 @@ function symbols = qam16_mod(bits, constellation, m_bits)
 end
 
 function bits = qam16_demod(symbols, constellation, bit_table, m_bits)
-% Demodulacao 16-QAM (hard decision)
-% symbols: simbolos recebidos
-% constellation: pontos da constelacao
-% bit_table: tabela de mapeamento bit->simbolo
+% Demodulacao 16-QAM - hard decision
 
     num_symbols = length(symbols);
     bits = zeros(1, num_symbols * m_bits);
     
     for i = 1:num_symbols
-        % Encontrar ponto mais proximo
+        % Encontrar ponto mais proximo na constelacao
         dist = abs(symbols(i) - constellation);
         [~, idx] = min(dist);
-        
-        % Mapear para bits
         bits((i-1)*m_bits + 1 : i*m_bits) = bit_table(idx, :);
     end
 end
 
 function llr = compute_llr_16qam(symbols, constellation, bit_table, sigma2)
 % Calcular LLRs para 16-QAM
-% LLR(b) = log(P(b=0|y)/P(b=1|y))
-% Aproximacao: log-sum-exp para estabilidade numerica
 
     m_bits = size(bit_table, 2);
     num_symbols = length(symbols);
@@ -605,61 +554,49 @@ function llr = compute_llr_16qam(symbols, constellation, bit_table, sigma2)
 end
 
 function s = logsumexp(x)
-% Calculo estavel de log(sum(exp(x)))
+% log(sum(exp(x))) de forma estavel
     m = max(x);
     s = m + log(sum(exp(x - m)));
 end
 
 function [decoded, converged] = ldpc_decode_bp(llr_ch, H, max_iter)
-% Decodificador LDPC usando Belief Propagation (Sum-Product)
-% llr_ch: LLRs do canal (vetor coluna)
-% H: matriz de paridade
-% max_iter: maximo de iteracoes
+% Decodificador LDPC - Belief Propagation
 
     [m, n] = size(H);
     
-    % Inicializar mensagens variavel -> check
+    % Inicializar mensagens
     L_v2c = repmat(llr_ch, 1, m) .* H';
     
-    % Iteracoes BP
     for iter = 1:max_iter
-        % Check node update: mensagens check -> variavel
+        % Mensagens check -> variavel
         L_c2v = zeros(n, m);
-        
         for j = 1:m
-            % Variaveis conectadas ao check node j
-            var_idx = find(H(j, :) == 1);
-            
-            for i = var_idx
-                % Produto de tanh das mensagens de outras variaveis
-                other_vars = setdiff(var_idx, i);
-                if ~isempty(other_vars)
-                    tanh_prod = prod(tanh(L_v2c(other_vars, j) / 2));
-                    % Limitar para estabilidade numerica
-                    tanh_prod = max(min(tanh_prod, 0.9999), -0.9999);
-                    L_c2v(i, j) = 2 * atanh(tanh_prod);
+            vars = find(H(j, :) == 1);
+            for i = vars
+                others = setdiff(vars, i);
+                if ~isempty(others)
+                    tprod = prod(tanh(L_v2c(others, j) / 2));
+                    tprod = max(min(tprod, 0.9999), -0.9999);
+                    L_c2v(i, j) = 2 * atanh(tprod);
                 end
             end
         end
         
-        % Variavel node update e decisao
+        % Decisao
         L_total = llr_ch + sum(L_c2v, 2);
-        
-        % Decisao hard
         decoded = (L_total < 0)';
         
-        % Verificar se atingiu codeword valido (sindrome = 0)
-        syndrome = mod(H * decoded', 2);
-        if all(syndrome == 0)
+        % Verificar sindrome
+        if all(mod(H * decoded', 2) == 0)
             converged = true;
             return;
         end
         
-        % Atualizar mensagens variavel -> check para proxima iteracao
+        % Atualizar mensagens variavel -> check
         for i = 1:n
-            check_idx = find(H(:, i) == 1);
-            for j = check_idx'
-                L_v2c(i, j) = llr_ch(i) + sum(L_c2v(i, setdiff(check_idx, j)));
+            checks = find(H(:, i) == 1);
+            for j = checks'
+                L_v2c(i, j) = llr_ch(i) + sum(L_c2v(i, setdiff(checks, j)));
             end
         end
     end
@@ -668,45 +605,26 @@ function [decoded, converged] = ldpc_decode_bp(llr_ch, H, max_iter)
 end
 
 function ofdm_signal = ofdm_mod(qam_symbols, N_FFT, N_data, cp_len)
-% Modulacao OFDM
-% qam_symbols: simbolos QAM (vetor linha)
-% N_FFT: tamanho da FFT
-% N_data: numero de subportadoras de dados
-% cp_len: comprimento do prefixo ciclico
+% Modulacao OFDM - IFFT + prefixo ciclico
 
-    % Montar vetor de frequencias (subportadoras centrais)
     ofdm_frame = zeros(1, N_FFT);
     
-    % Posicionar simbolos nas subportadoras de dados (excluindo DC e bordas)
+    % Posicionar simbolos nas subportadoras centrais
     start_idx = floor((N_FFT - N_data) / 2) + 1;
-    end_idx = start_idx + N_data - 1;
-    
     num_sym = min(length(qam_symbols), N_data);
     ofdm_frame(start_idx:start_idx+num_sym-1) = qam_symbols(1:num_sym);
     
-    % IFFT (normalizada)
+    % IFFT e prefixo ciclico
     time_signal = ifft(ofdm_frame) * sqrt(N_FFT);
-    
-    % Adicionar prefixo ciclico
     ofdm_signal = [time_signal(end-cp_len+1:end), time_signal];
 end
 
 function qam_symbols = ofdm_demod(ofdm_signal, N_FFT, N_data, cp_len)
-% Demodulacao OFDM
-% ofdm_signal: sinal OFDM recebido (com CP)
-% N_FFT: tamanho da FFT
-% N_data: numero de subportadoras de dados
-% cp_len: comprimento do prefixo ciclico
+% Demodulacao OFDM - remover CP + FFT
 
-    % Remover prefixo ciclico
     time_signal = ofdm_signal(cp_len+1:end);
-    
-    % FFT (normalizada)
     freq_signal = fft(time_signal) / sqrt(N_FFT);
     
-    % Extrair subportadoras de dados
     start_idx = floor((N_FFT - N_data) / 2) + 1;
-    end_idx = start_idx + N_data - 1;
-    
-    qam_symbols = freq_signal(start_idx:end_idx);
+    qam_symbols = freq_signal(start_idx:start_idx+N_data-1);
 end
