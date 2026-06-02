@@ -23,128 +23,103 @@ H = [1 1 1 1 0 0; ...  % Equacao de paridade 1
      0 1 0 1 0 1; ...  % Equacao de paridade 2
      1 1 0 0 0 1];     % Equacao de paridade 3
 
-% Calcular matriz geradora G via eliminacao Gaussiana sobre GF(2)
+% Calcular matriz geradora G via metodo direto
 % H e m x n, queremos G de dimensao k x n onde H*G' = 0 (mod 2)
-% G = [I_k | A] onde as colunas de H correspondem a essa particao
 [m, n] = size(H);
-k = n - m;
+k = n - m;  % Numero de bits de informacao = 3
 
-% Fatoracao para encontrar G
-% A matriz G satisfaz: para todo c = u*G, H*c' = 0
-% Isso significa que as linhas de G formam uma base para o nucleo (kernel) de H
-% Calculamos via eliminacao gaussiana em H para forma [P | I_m]
+% Para matriz H pequena (3x6), calcular G por forca bruta sistematica
+% G deve satisfazer: para cada linha g de G, H * g' = 0 (mod 2)
+% E G deve ter posto k = 3 (linhas linearmente independentes)
 
-H_temp = H;
-% Eliminacao gaussiana para obter forma sistematica
-% Trocar colunas se necessario para ter pivots nas ultimas m colunas
-% Ordem de colunas: tentar usar colunas 4, 5, 6 como pivots
+% Algoritmo: encontrar todas as solucoes de H*x = 0 e escolher k independentes
+% Para codigo (6,3), o espaco nulo tem dimensao 3
 
-% Matriz de permutacao para reordenar colunas
-% Vamos tentar colocar H na forma [H_info | I_m]
-% onde H_info sao as colunas de informacao
+% Metodo: eliminacao gaussiana em H para identificar variaveis livres
+% Vamos colocar H na forma escalonada reduzida
 
-% Eliminacao gaussiana em GF(2)
-H_work = H;
+H_rref = mod(H, 2);  % Garantir que e binaria
 
-% Para cada linha, encontrar pivot e eliminar
-for i = 1:m
-    % Procurar pivot na linha i a partir da diagonal
-    pivot_found = false;
-    for j = i:n
-        if H_work(i, j) == 1
-            pivot_found = true;
-            % Trocar colunas i e j se necessario
-            if j ~= i
-                temp = H_work(:, i);
-                H_work(:, i) = H_work(:, j);
-                H_work(:, j) = temp;
-            end
+% Eliminacao gaussiana para forma escalonada
+pivot_cols = [];
+row = 1;
+for col = 1:n
+    % Procurar pivot
+    pivot_row = 0;
+    for r = row:m
+        if H_rref(r, col) == 1
+            pivot_row = r;
             break;
         end
     end
     
-    if pivot_found
-        % Eliminar outros 1s nesta coluna
+    if pivot_row > 0
+        % Trocar linhas se necessario
+        if pivot_row ~= row
+            temp = H_rref(row, :);
+            H_rref(row, :) = H_rref(pivot_row, :);
+            H_rref(pivot_row, :) = temp;
+        end
+        
+        % Eliminar abaixo e acima
         for r = 1:m
-            if r ~= i && H_work(r, i) == 1
-                H_work(r, :) = mod(H_work(r, :) + H_work(i, :), 2);
+            if r ~= row && H_rref(r, col) == 1
+                H_rref(r, :) = mod(H_rref(r, :) + H_rref(row, :), 2);
             end
+        end
+        
+        pivot_cols = [pivot_cols, col];
+        row = row + 1;
+        if row > m
+            break;
         end
     end
 end
 
-% Agora H_work esta na forma sistematica [A | I_m] (aproximadamente)
-% A matriz geradora e G = [I_k | A^T]
-% As primeiras k colunas sao identidade (bits de info)
-% As ultimas m colunas sao A^T (bits de paridade)
+% Colunas livres (nao sao pivots)
+free_cols = setdiff(1:n, pivot_cols);
 
-% Extrair A das primeiras k colunas de H_work
-% (na forma sistematica H = [A^T | I], entao A = H_info^T)
+% Construir G: para cada variavel livre, criar uma solucao basica
+% G tem k linhas (uma para cada variavel livre) e n colunas
+G = zeros(k, n);
 
-% Determinar quais colunas sao de informacao (nao fazem parte da identidade)
-% Na forma sistematica, as ultimas m colunas formam I_m
-info_cols = [];
-parity_cols = [];
-
-for j = 1:n
-    col = H_work(:, j);
-    % Verificar se e coluna da identidade (um 1 e resto 0)
-    if sum(col) == 1
-        parity_cols = [parity_cols, j];
-    else
-        info_cols = [info_cols, j];
+for i = 1:k
+    % i-esima linha de G: variavel livre i = 1, outras livres = 0
+    x = zeros(1, n);
+    x(free_cols(i)) = 1;  % Variavel livre
+    
+    % Calcular variaveis de pivot
+    for j = 1:length(pivot_cols)
+        pc = pivot_cols(j);
+        % x(pc) = -sum(H_rref(j, free_cols) * x(free_cols)) mod 2
+        x(pc) = mod(-H_rref(j, :) * x', 2);
     end
+    
+    G(i, :) = x;
 end
 
-% Reordenar para ter info_cols primeiro, depois parity_cols
-new_order = [info_cols, parity_cols];
-H_sys = H_work(:, new_order);
-
-% Verificar se H_sys esta na forma [P | I_m]
-% Se sim, P e a matriz de paridade
-P = H_sys(:, 1:k);
-
-% Matriz geradora G = [I_k | P^T]
-G = [eye(k), P'];
-
-% Verificacao: H * G^T deve ser zero (mod 2)
-% Mas precisamos verificar com a H original reordenada
-H_check = H(:, new_order);
-syndrome_check = mod(H_check * G', 2);
-
-if any(syndrome_check(:))
-    % Fallback: calcular G via espaco nulo
-    % G sera tal que suas linhas formam base para null space de H
-    warning('Usando metodo alternativo para calcular G');
-    % Encontrar solucoes de H * x = 0 por eliminacao gaussiana
-    % As variaveis livres correspondem aos bits de informacao
-    G = zeros(k, n);
-    for i = 1:k
-        % i-esima linha de G: bit de info i = 1, outros 0
-        % Resolver H * x = 0 com x_i = 1 e x_j = 0 para outros j em info
-        % As variaveis de paridade sao determinadas pelas equacoes
-        % Implementacao simples por forca bruta para codigo pequeno
-        for trial = 0:(2^m - 1)
-            x_parity = bitget(trial, 1:m);
-            x = zeros(1, n);
-            x(i) = 1;
-            x(k+1:end) = x_parity;
-            if all(mod(H * x', 2) == 0)
-                G(i, :) = x;
-                break;
-            end
-        end
-    end
-end
+% Debug: mostrar matrizes calculadas
+fprintf('\n=== DEBUG Matrizes LDPC ===\n');
+fprintf('H original:\n');
+disp(H);
+fprintf('H_rref (escalonada):\n');
+disp(H_rref);
+fprintf('Colunas pivot: '); disp(pivot_cols);
+fprintf('Colunas livres: '); disp(free_cols);
+fprintf('Matriz G calculada:\n');
+disp(G);
 
 % Verificacao final
 syndrome_check = mod(H * G', 2);
+fprintf('H * G^T (deve ser zero):\n');
+disp(syndrome_check);
+
 if any(syndrome_check(:))
-    error('Matrizes H e G inconsistentes! Verifique manualmente.');
+    error('Matrizes H e G inconsistentes! H*G^T != 0');
 end
 
 fprintf('Verificacao LDPC: H*G^T = 0 (mod 2) - OK\n');
-fprintf('Matriz H (3x6): codigo (6,3) com taxa R=1/2\n');
+fprintf('Matriz H (%dx%d): codigo (%d,%d) com taxa R=%.2f\n\n', m, n, n, k, k/n);
 
 % Parametros do codigo LDPC
 n_ldpc = 6;          % Comprimento do codeword
@@ -182,9 +157,10 @@ for idx = 0:M-1
     b3 = bitget(idx, 2);
     b4 = bitget(idx, 1);
     
-    % Mapeamento: 00->-3, 01->-1, 10->+1, 11->+3 (invertido para Gray-like)
-    I = amp(bi2de([b1 b2], 'left-msb') + 1);
-    Q = amp(bi2de([b3 b4], 'left-msb') + 1);
+    % Mapeamento: 00->-3, 01->-1, 10->+1, 11->+3
+    % bi2de manual: valor = b1*2 + b2 (left-msb)
+    I = amp(b1*2 + b2 + 1);
+    Q = amp(b3*2 + b4 + 1);
     
     constellation(idx + 1) = I + 1j*Q;
 end
@@ -372,10 +348,10 @@ for idx_snr = 1:length(SNR_dB)
     BER_ldpc(idx_snr) = num_err_ldpc / total_info_bits;
     
     % Calcular ganho aproximado (para exibicao)
+    % Ganho simples: melhoria multiplicativa na BER
     if BER_uncoded(idx_snr) > 0 && BER_ldpc(idx_snr) > 0
-        snr_eq_uncoded = snr_db;
-        snr_eq_ldpc = interp1(log10(BER_uncoded), SNR_dB, log10(BER_ldpc(idx_snr)), 'linear', 'extrap');
-        ganho = snr_eq_uncoded - snr_eq_ldpc;
+        ganho_factor = BER_uncoded(idx_snr) / BER_ldpc(idx_snr);
+        ganho = 10*log10(ganho_factor);  % Em dB aproximado
     else
         ganho = 0;
     end
@@ -551,7 +527,11 @@ function symbols = qam16_mod(bits, constellation, m_bits)
     
     for i = 1:num_symbols
         bit_chunk = bits((i-1)*m_bits + 1 : i*m_bits);
-        idx = bi2de(bit_chunk, 'left-msb') + 1;
+        % bi2de manual (left-msb): converte vetor de bits para decimal
+        idx = 1;
+        for b = 1:m_bits
+            idx = idx + bit_chunk(b) * 2^(m_bits - b);
+        end
         symbols(i) = constellation(idx);
     end
 end
